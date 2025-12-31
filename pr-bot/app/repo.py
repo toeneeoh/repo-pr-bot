@@ -1,0 +1,57 @@
+"""
+repo.py
+
+filesystem-level utilities: safe path handling, file iteration, and evidence context extraction.
+ensures repo access stays inside repo_root and provides consistent snippets to the llm.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+from .path_utils import safe_relpath
+
+from fastapi import HTTPException
+
+
+def iter_files(repo_path: Path, scope: list[str]) -> list[Path]:
+    roots = [repo_path / s for s in scope] if scope else [repo_path]
+    out: list[Path] = []
+    for r in roots:
+        if not r.exists():
+            continue
+        for p in r.rglob("*"):
+            if p.is_file() and ".git" not in p.parts:
+                out.append(p)
+    return out
+
+
+def extract_context(repo_path: Path, evidence: list[dict[str, Any]], radius: int = 60) -> str:
+    blocks: list[str] = []
+
+    for ev in evidence:
+        rel = ev.get("path")
+        if not isinstance(rel, str):
+            continue
+        p = (repo_path / rel).resolve()
+        safe_relpath(p, repo_path)
+
+        try:
+            lines = p.read_text(encoding="utf-8", errors="ignore").splitlines()
+        except Exception:
+            continue
+
+        start = int(ev.get("start", 1))
+        end = int(ev.get("end", start))
+        start_i = max(1, start - radius)
+        end_i = min(len(lines), end + radius)
+
+        snippet = "\n".join(f"{i:>6}: {lines[i-1]}" for i in range(start_i, end_i + 1))
+        why = ev.get("why", "")
+        blocks.append(
+            f"file: {rel}\n"
+            f"evidence: lines {start}-{end} ({why})\n"
+            f"{snippet}\n"
+        )
+
+    return "\n\n".join(blocks)
