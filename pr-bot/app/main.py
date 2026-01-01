@@ -9,9 +9,11 @@ from __future__ import annotations
 import json
 import textwrap
 
+from typing import Any
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from .models import CandidatesRequest
+from pydantic import Field, BaseModel
 
 from .models import (
     RepoSelectRequest, Policy, CandidatesResponse,
@@ -19,14 +21,16 @@ from .models import (
     ValidateRequest, ValidateResponse,
     RepoInfo,
 )
-from .settings import REPO_ROOT
-from .config_store import load_config, save_config
-from .repo import iter_files, extract_context
+from .settings import REPO_ROOT, CONFIG_PATH
+from .config_store import ConfigStore
+from .repo_fs import iter_files, extract_context
 from .candidates import grep_candidates
 from .diff_utils import strip_to_unified_diff, estimate_diff_churn, diff_paths_are_safe, _diff_files_exist, _diff_touched_files
 from .llm_ollama import ollama_generate, lua_reference_paths_exist
 from .worktree import make_worktree, apply_patch
 from .validate import validate_worktree
+
+STORE = ConfigStore(CONFIG_PATH)
 
 app = FastAPI(title="repo pr-bot", version="0.1.0")
 
@@ -46,7 +50,7 @@ app.add_middleware(
 
 
 def get_repo_info(name: str) -> RepoInfo:
-    cfg = load_config()
+    cfg = STORE.load()
     repo = cfg.get("repos", {}).get(name)
     if not repo:
         raise HTTPException(status_code=404, detail=f"unknown repo: {name}")
@@ -56,13 +60,17 @@ def get_repo_info(name: str) -> RepoInfo:
         raise HTTPException(status_code=404, detail="repo path not found on disk")
 
     policy = Policy(**repo.get("policy", {}))
+    exclude = repo.get("exclude", [])
+
     return RepoInfo(
         name=name,
         repo_path=repo_path,
         branch=repo.get("branch", "main"),
         scope=repo.get("scope", []),
+        exclude=exclude,
         policy=policy,
     )
+
 
 
 @app.get("/health")
@@ -72,7 +80,7 @@ def health():
 
 @app.post("/repo/select")
 def repo_select(req: RepoSelectRequest):
-    cfg = load_config()
+    cfg = STORE.load()
     cfg.setdefault("repos", {})
     cfg["repos"][req.name] = {
         "path": req.path,
@@ -80,24 +88,24 @@ def repo_select(req: RepoSelectRequest):
         "scope": req.scope,
         "policy": cfg["repos"].get(req.name, {}).get("policy", {}),
     }
-    save_config(cfg)
+    STORE.save(cfg)
     return {"ok": True, "repo": req.name}
 
 
 @app.post("/repo/policy")
 def repo_policy(repo: str, policy: Policy):
-    cfg = load_config()
+    cfg = STORE.load()
     if repo not in cfg.get("repos", {}):
         raise HTTPException(status_code=404, detail="unknown repo")
     cfg["repos"][repo]["policy"] = policy.model_dump()
-    save_config(cfg)
+    STORE.save(cfg)
     return {"ok": True, "repo": repo}
 
 
 @app.post("/candidates", response_model=CandidatesResponse)
 def candidates(req: CandidatesRequest) -> CandidatesResponse:
     info = get_repo_info(req.repo)
-    files = iter_files(info.repo_path, info.scope)
+    files = iter_files(info.repo_path, info.scope, info.exclude)
     cands = grep_candidates(files, info.repo_path)
     return CandidatesResponse(repo=req.repo, candidates=cands)
 
@@ -106,7 +114,7 @@ def candidates(req: CandidatesRequest) -> CandidatesResponse:
 def candidate_patch(req: PatchRequest) -> PatchResponse:
     info = get_repo_info(req.repo)
 
-    files = iter_files(info.repo_path, info.scope)
+    files = iter_files(info.repo_path, info.scope, info.exclude)
     cands = grep_candidates(files, info.repo_path)
     cand = next((c for c in cands if c.id == req.candidate_id), None)
     if cand is None:
@@ -225,3 +233,85 @@ def validate(req: ValidateRequest) -> ValidateResponse:
 
     ok, steps = validate_worktree(work)
     return ValidateResponse(repo=req.repo, ok=ok, steps=steps)
+
+
+@app.get("/repos")
+def repos_list() -> dict[str, Any]:
+    return {"repos": STORE.list_repos()}
+
+
+@app.get("/repos/{name}")
+def repos_get(name: str) -> dict[str, Any]:
+    return {"name": name, "repo": STORE.get_repo(name)}
+
+
+@app.delete("/repos/{name}")
+def repos_delete(name: str) -> dict[str, Any]:
+    STORE.delete_repo(name)
+    return {"ok": True, "deleted": name}
+
+
+@app.post("/repos/register")
+def repos_register(req: RepoSelectRequest) -> dict[str, Any]:
+    # path stays under REPO_ROOT
+    repo_path = (REPO_ROOT / req.path).resolve()
+    if not repo_path.exists():
+        raise HTTPException(status_code=404, detail="repo path not found on disk")
+
+    try:
+        repo_path.relative_to(REPO_ROOT.resolve())
+    except Exception as e:
+        raise HTTPException(status_code=400, detail="repo path escapes REPO_ROOT") from e
+
+    existing = STORE.load().get("repos", {}).get(req.name, {})
+    STORE.upsert_repo(req.name, {
+        "path": req.path,
+        "branch": req.branch,
+        "scope": req.scope,
+        "exclude": req.exclude,
+        # preserve existing policy unless overwritten elsewhere
+        "policy": existing.get("policy", {}),
+    })
+    return {"ok": True, "repo": req.name}
+
+
+class ScopeUpdateRequest(BaseModel):
+    scope: list[str] = Field(default_factory=list)
+    exclude: list[str] = Field(default_factory=list)
+
+
+@app.post("/repos/{name}/scope")
+def repos_update_scope(name: str, req: ScopeUpdateRequest) -> dict[str, Any]:
+    repo = STORE.get_repo(name)
+    repo["scope"] = req.scope
+    if req.exclude:
+        repo["exclude"] = req.exclude
+    STORE.upsert_repo(name, repo)
+    return {"ok": True, "repo": name, "scope": repo.get("scope", []), "exclude": repo.get("exclude", [])}
+
+
+@app.post("/repos/{name}/policy")
+def repos_update_policy(name: str, policy: Policy) -> dict[str, Any]:
+    repo = STORE.get_repo(name)
+    repo["policy"] = policy.model_dump()
+    STORE.upsert_repo(name, repo)
+    return {"ok": True, "repo": name}
+
+
+@app.post("/repos/{name}/validate")
+def repos_validate(name: str) -> dict[str, Any]:
+    repo = STORE.get_repo(name)
+    repo_path = (REPO_ROOT / repo["path"]).resolve()
+
+    ok = repo_path.exists()
+    details = {"repo_path": str(repo_path), "exists": ok}
+
+    if ok:
+        # count files in scope after excludes
+        from .repo_fs import iter_files
+        info = get_repo_info(name)
+        files = iter_files(info.repo_path, info.scope, info.exclude)
+        details["files_seen"] = len(files)
+
+    return {"ok": ok, "details": details}
+
