@@ -12,15 +12,24 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Literal
+from pathlib import Path
 
 from pydantic import BaseModel, Field
 
 
 class RepoSelectRequest(BaseModel):
-    name: str = Field(..., description="human name for the repo, used as key")
-    path: str = Field(..., description="path under REPO_ROOT, e.g. myproj or myproj/subdir")
-    branch: str = Field("main")
-    scope: list[str] = Field(default_factory=list, description="subpaths inside repo to focus on, empty = whole repo")
+    name: str
+    path: str
+    branch: str = "main"
+    scope: list[str] = Field(default_factory=list)
+    exclude: list[str] = Field(default_factory=lambda: [
+        "**/.git/**",
+        "**/__pycache__/**",
+        "**/.pytest_cache/**",
+        "**/.mypy_cache/**",
+        "**/.venv/**",
+        "**/node_modules/**",
+    ])
 
 
 class Policy(BaseModel):
@@ -80,7 +89,8 @@ class ValidateResponse(BaseModel):
 @dataclass
 class RepoInfo:
     name: str
-    repo_path: "Path"  # avoid circular import in type-checkers
+    repo_path: Path
     branch: str
     scope: list[str]
+    exclude: list[str]
     policy: Policy
