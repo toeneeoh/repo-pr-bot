@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import pytest
 
-from app.repo import extract_context
+from app.repo_fs import extract_context
 from app.path_utils import safe_relpath
 
 
