@@ -11,7 +11,7 @@ def test_grep_candidates_finds_lua_todo(tmp_repo: Path):
     fdir.mkdir(parents=True)
     (fdir / "root.lua").write_text("-- TODO: fix thing\nprint('hi')\n", encoding="utf-8")
 
-    files = iter_files(tmp_repo, scope=[], exlude=[])
+    files = iter_files(tmp_repo, scope=[], exclude=[])
     cands = grep_candidates(files, tmp_repo)
 
     ids = {c.id for c in cands}
