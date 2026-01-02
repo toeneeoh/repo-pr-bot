@@ -12,8 +12,10 @@ import textwrap
 from typing import Any
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
-from .models import CandidatesRequest
+from .models import CandidatesRequest, TestRunRequest, TestRunResponse
 from pydantic import Field, BaseModel
+
+from .test_runner import run_pytest
 
 from .models import (
     RepoSelectRequest, Policy, CandidatesResponse,
@@ -104,15 +106,15 @@ def repo_policy(repo: str, policy: Policy):
 
 @app.post("/candidates", response_model=CandidatesResponse)
 def candidates(req: CandidatesRequest) -> CandidatesResponse:
-    info = get_repo_info(req.repo)
+    info = get_repo_info(req.repo_name)
     files = iter_files(info.repo_path, info.scope, info.exclude)
     cands = grep_candidates(files, info.repo_path)
-    return CandidatesResponse(repo=req.repo, candidates=cands)
+    return CandidatesResponse(repo=req.repo_name, candidates=cands)
 
 
 @app.post("/candidate/patch", response_model=PatchResponse)
 def candidate_patch(req: PatchRequest) -> PatchResponse:
-    info = get_repo_info(req.repo)
+    info = get_repo_info(req.repo_name)
 
     files = iter_files(info.repo_path, info.scope, info.exclude)
     cands = grep_candidates(files, info.repo_path)
@@ -220,19 +222,19 @@ repo evidence + surrounding context (copy/paste from here; do not paraphrase lin
         "target_file": target_file,
     }
 
-    return PatchResponse(repo=req.repo, candidate_id=req.candidate_id, diff=diff, notes=json.dumps(notes, indent=2))
+    return PatchResponse(repo=req.repo_name, candidate_id=req.candidate_id, diff=diff, notes=json.dumps(notes, indent=2))
 
 
 @app.post("/validate", response_model=ValidateResponse)
 def validate(req: ValidateRequest) -> ValidateResponse:
-    info = get_repo_info(req.repo)
+    info = get_repo_info(req.repo_name)
     work = make_worktree(info.repo_path)
 
     if req.diff:
         apply_patch(work, req.diff)
 
     ok, steps = validate_worktree(work)
-    return ValidateResponse(repo=req.repo, ok=ok, steps=steps)
+    return ValidateResponse(repo=req.repo_name, ok=ok, steps=steps)
 
 
 @app.get("/repos")
@@ -264,7 +266,7 @@ def repos_register(req: RepoSelectRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="repo path escapes REPO_ROOT") from e
 
     existing = STORE.load().get("repos", {}).get(req.name, {})
-    STORE.upsert_repo(req.name, {
+    STORE.upsert_repo(req.repo_name, {
         "path": req.path,
         "branch": req.branch,
         "scope": req.scope,
@@ -272,7 +274,7 @@ def repos_register(req: RepoSelectRequest) -> dict[str, Any]:
         # preserve existing policy unless overwritten elsewhere
         "policy": existing.get("policy", {}),
     })
-    return {"ok": True, "repo": req.name}
+    return {"ok": True, "repo": req.repo_name}
 
 
 class ScopeUpdateRequest(BaseModel):
@@ -314,4 +316,12 @@ def repos_validate(name: str) -> dict[str, Any]:
         details["files_seen"] = len(files)
 
     return {"ok": ok, "details": details}
+
+@app.post("/tests/run", response_model=TestRunResponse,
+                        summary="run pytest in container and return output")
+def tests_run(req: TestRunRequest) -> TestRunResponse:
+    # assumes this file lives at /app/app/main.py and tests are at /app/tests
+    project_root = Path(__file__).resolve().parents[1]  # /app
+    res = run_pytest(project_root=project_root, expr=req.expr, timeout_s=req.timeout_s)
+    return TestRunResponse(ok=res.ok, exit_code=res.exit_code, output=res.output)
 
