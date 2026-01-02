@@ -18,8 +18,8 @@ from pydantic import BaseModel, Field
 
 
 class RepoSelectRequest(BaseModel):
-    name: str
-    path: str
+    repo_name: str = Field(..., alias="name", description="registered repo name/key, e.g. curse-of-time")
+    path: str = Field(..., description="path under REPO_ROOT, e.g. curse-of-time")
     branch: str = "main"
     scope: list[str] = Field(default_factory=list)
     exclude: list[str] = Field(default_factory=lambda: [
@@ -29,7 +29,8 @@ class RepoSelectRequest(BaseModel):
         "**/.mypy_cache/**",
         "**/.venv/**",
         "**/node_modules/**",
-    ])
+    ], description="glob patterns to skip")
+    model_config = {"populate_by_name": True}
 
 
 class Policy(BaseModel):
@@ -55,33 +56,33 @@ class Candidate(BaseModel):
 
 
 class CandidatesResponse(BaseModel):
-    repo: str
+    repo_name: str
     candidates: list[Candidate]
 
 
 class CandidatesRequest(BaseModel):
-    repo: str
+    repo_name: str
 
 
 class PatchRequest(BaseModel):
-    repo: str
-    candidate_id: str
+    repo_name: str = Field(..., description="registered repo name, e.g. curse-of-time")
+    candidate_id: str = Field(..., description="candidate identifier from /candidates, e.g. lua-todo-triage")
 
 
 class PatchResponse(BaseModel):
-    repo: str
+    repo_name: str
     candidate_id: str
     diff: str
     notes: str
 
 
 class ValidateRequest(BaseModel):
-    repo: str
+    repo_name: str
     diff: str | None = None
 
 
 class ValidateResponse(BaseModel):
-    repo: str
+    repo_name: str
     ok: bool
     steps: list[dict[str, Any]]
 
@@ -94,3 +95,17 @@ class RepoInfo:
     scope: list[str]
     exclude: list[str]
     policy: Policy
+
+class TestRunRequest(BaseModel):
+    expr: str | None = Field(
+        default=None,
+        description="optional pytest selection, e.g. tests/test_repo_utils.py::test_iter_files",
+    )
+    timeout_s: int = Field(default=180, ge=10, le=900)
+
+
+class TestRunResponse(BaseModel):
+    ok: bool
+    exit_code: int
+    output: str
+
