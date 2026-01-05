@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.candidates import grep_candidates
-from app.repo_fs import iter_files
+from app.repo import iter_files
 
 
 def test_grep_candidates_finds_lua_todo(tmp_repo: Path):
