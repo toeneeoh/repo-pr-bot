@@ -12,12 +12,15 @@ import textwrap
 from typing import Any
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
-from .models import CandidatesRequest, TestRunRequest, TestRunResponse
 from pydantic import Field, BaseModel
 
 from .test_runner import run_pytest
+from .scan import scan_repo
+from .autopr import autopr_run
 
 from .models import (
+    RepoScanResponse, AutoPRRequest, AutoPRResponse,
+    CandidatesRequest, TestRunRequest, TestRunResponse,
     RepoSelectRequest, Policy, CandidatesResponse,
     PatchRequest, PatchResponse,
     ValidateRequest, ValidateResponse,
@@ -43,7 +46,6 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://127.0.0.1:3000",
-        # if you ever access openwebui via a different host/port, add it here
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -324,4 +326,45 @@ def tests_run(req: TestRunRequest) -> TestRunResponse:
     project_root = Path(__file__).resolve().parents[1]  # /app
     res = run_pytest(project_root=project_root, expr=req.expr, timeout_s=req.timeout_s)
     return TestRunResponse(ok=res.ok, exit_code=res.exit_code, output=res.output)
+
+
+@app.post("/repos/{name}/scan", response_model=RepoScanResponse,
+          summary="scan repo stats + return candidates")
+def repos_scan(name: str) -> RepoScanResponse:
+    info = get_repo_info(name)
+
+    scan = scan_repo(name, info.repo_path, info.scope, info.exclude)
+
+    files = iter_files(info.repo_path, info.scope, info.exclude)
+    cands = grep_candidates(files, info.repo_path)
+
+    return RepoScanResponse(
+        repo_name=name,
+        repo_path=scan.repo_path,
+        files_seen=scan.files_seen,
+        loc_estimate=scan.loc_estimate,
+        by_ext=scan.by_ext,
+        candidates=cands,
+    )
+
+
+@app.post("/repos/{name}/autopr", response_model=AutoPRResponse,
+          summary="generate patch + validate + (optional) pytest with bounded retries")
+def repos_autopr(name: str, req: AutoPRRequest) -> AutoPRResponse:
+    info = get_repo_info(name)
+
+    result = autopr_run(
+        repo_name=name,
+        repo_path=info.repo_path,
+        scope=info.scope,
+        exclude=info.exclude,
+        policy_constraints=info.policy.constraints,
+        candidate_id=req.candidate_id,
+        max_attempts=req.max_attempts,
+        run_tests_flag=req.run_tests,
+        test_expr=req.test_expr,
+        test_timeout_s=req.test_timeout_s,
+    )
+
+    return AutoPRResponse(**result)
 
