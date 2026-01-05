@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from app.repo_fs import iter_files, extract_context
+from app.repo import iter_files, extract_context
 
 
 def _write(p: Path, s: str) -> None:
