@@ -98,7 +98,18 @@ def grep_candidates(files: list[Path], repo_path: Path) -> list[Candidate]:
             language="lua",
             risk="low",
             churn_estimate="small",
-            evidence=evid_lua_todo[:2],
+            evidence=evid_lua_todo[:1],
+            context_radius=15,
+            target_file_only=True,
+            extra_prompt_rules="""
+        ABSOLUTE RULES FOR lua-todo-triage:
+        - you may ONLY modify the TODO/FIXME/HACK COMMENT LINE ITSELF
+        - the line containing the TODO marker is the ONLY line you may change
+        - you MUST NOT modify any executable code
+        - you MUST NOT modify dofile(), require(), function calls, assignments, or control flow
+        - you MUST NOT rename files or reference new filenames
+        - if clarification is not possible, output an EMPTY diff
+        """
         ))
 
     if evid_lua_globals:
