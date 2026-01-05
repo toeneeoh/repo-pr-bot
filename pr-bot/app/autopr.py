@@ -26,8 +26,8 @@ from .diff_utils import (
     diff_paths_are_safe,
     _diff_files_exist,
 )
-from .llm_ollama import ollama_generate, lua_reference_paths_exist
-from .repo_fs import iter_files, extract_context
+from .llm import ollama_generate
+from .repo import iter_files, extract_context
 from .test_runner import run_pytest
 from .validate import validate_worktree
 from .worktree import make_worktree, apply_patch
@@ -100,6 +100,9 @@ def generate_patch_for_candidate(
     if not context.strip():
         raise HTTPException(status_code=400, detail="no context could be extracted for candidate evidence")
 
+    extra_rules_block = ("candidate-specific rules (HARD):\n" + extra_rules) if extra_rules else ""
+    failure_block = ("previous attempt failed; adjust the patch. failure info:\n" + failure_feedback) if failure_feedback else ""
+
     prompt = textwrap.dedent(
         f"""
 you are a repo co-maintainer. generate a SMALL pull-request patch.
@@ -118,7 +121,7 @@ rules (HARD):
 - keep changes narrowly scoped to the candidate goal
 - if the safe fix is unclear, output an EMPTY diff (no changes) rather than guessing
 
-{("candidate-specific rules (HARD):\n" + extra_rules) if extra_rules else ""}
+{extra_rules_block}
 
 repo: {repo_name}
 
@@ -131,7 +134,7 @@ candidate:
 repo evidence + surrounding context (copy/paste from here; do not paraphrase lines):
 {context}
 
-{("previous attempt failed; adjust the patch. failure info:\n" + failure_feedback) if failure_feedback else ""}
+{failure_block}
 """
     ).strip() + "\n"
 
@@ -154,10 +157,6 @@ repo evidence + surrounding context (copy/paste from here; do not paraphrase lin
         raise HTTPException(status_code=400, detail=f"diff touches too many files: {files_touched} > {max_files}")
     if (added + removed) > max_loc:
         raise HTTPException(status_code=400, detail=f"diff too large: added+removed={added+removed} > {max_loc}")
-
-    ok_refs, why = lua_reference_paths_exist(repo_path, diff)
-    if not ok_refs:
-        raise HTTPException(status_code=400, detail=f"diff rejected: {why}")
 
     meta = {
         "target_file": target_file,
