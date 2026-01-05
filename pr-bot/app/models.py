@@ -16,6 +16,45 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+class Candidate(BaseModel):
+    id: str
+    title: str
+    rationale: str
+    language: Literal["python", "lua", "mixed"]
+    risk: Literal["low", "medium", "high"]
+    churn_estimate: str
+    evidence: list[dict[str, Any]]
+
+    # new
+    extra_prompt_rules: str | None = None
+    context_radius: int = 40
+    target_file_only: bool = False
+
+
+class RepoScanResponse(BaseModel):
+    repo_name: str
+    repo_path: str
+    files_seen: int
+    loc_estimate: int
+    by_ext: dict[str, int]
+    candidates: list[Candidate]
+
+
+class AutoPRRequest(BaseModel):
+    candidate_id: str | None = None
+    max_attempts: int = 2
+
+    run_tests: bool = True
+    test_expr: str | None = None
+    test_timeout_s: int = 180
+
+
+class AutoPRResponse(BaseModel):
+    ok: bool
+    repo: str
+    candidate_id: str | None = None
+    attempts: list[dict[str, Any]]
+
 
 class RepoSelectRequest(BaseModel):
     repo_name: str = Field(..., alias="name", description="registered repo name/key, e.g. curse-of-time")
