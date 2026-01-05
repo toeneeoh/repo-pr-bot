@@ -3,8 +3,6 @@ llm.py
 
 talks to ollama.
 keeps http and model-specific behavior out of routes/services.
-
-this module should not import fastapi; raise RuntimeError on failures.
 """
 
 from __future__ import annotations
