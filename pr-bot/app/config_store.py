@@ -14,8 +14,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from fastapi import HTTPException
-
 
 @dataclass(frozen=True)
 class ConfigStore:
@@ -34,7 +32,7 @@ class ConfigStore:
         cfg = self.load()
         repo = cfg.get("repos", {}).get(name)
         if not repo:
-            raise HTTPException(status_code=404, detail=f"unknown repo: {name}")
+            raise KeyError(f"unknown repo: {name}")
         return repo
 
     def upsert_repo(self, name: str, repo_cfg: dict[str, Any]) -> None:
@@ -46,7 +44,7 @@ class ConfigStore:
     def delete_repo(self, name: str) -> None:
         cfg = self.load()
         if name not in cfg.get("repos", {}):
-            raise HTTPException(status_code=404, detail=f"unknown repo: {name}")
+            raise KeyError(f"unknown repo: {name}")
         del cfg["repos"][name]
         self.save(cfg)
 
