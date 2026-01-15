@@ -24,7 +24,7 @@ from .diff_utils import (
     strip_to_unified_diff,
     estimate_diff_churn,
     diff_paths_are_safe,
-    _diff_files_exist,
+    diff_files_exist,
 )
 from .llm import ollama_generate
 from .repo import iter_files, extract_context
@@ -109,7 +109,6 @@ you are a repo co-maintainer. generate a SMALL pull-request patch.
 
 rules (HARD):
 - output ONLY a unified diff (git-style). no prose.
-- do NOT include any 'index ...' lines
 - include at most ONE hunk
 - copy surrounding context lines EXACTLY as shown
 - all paths must be relative to repo root; use: diff --git a/<path> b/<path>
@@ -148,7 +147,7 @@ repo evidence + surrounding context (copy/paste from here; do not paraphrase lin
     if not diff_paths_are_safe(diff):
         raise HTTPException(status_code=400, detail="diff contains unsafe paths (absolute or traversal)")
 
-    ok, msg = _diff_files_exist(repo_path, diff)
+    ok, msg = diff_files_exist(repo_path, diff)
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
 
