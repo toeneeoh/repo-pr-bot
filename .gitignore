@@ -1,3 +1,5 @@
 config/repos.json
 .pytest*
 __pycache__
+repos/*
+!repos/.keep
