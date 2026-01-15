@@ -65,7 +65,6 @@ class PRBotService:
 
             rules (HARD):
             - output ONLY a unified diff (git-style). no prose.
-            - do NOT include any 'index ...' lines
             - include at most ONE hunk
             - copy surrounding context lines EXACTLY as shown
             - all paths must be relative to repo root; use: diff --git a/<path> b/<path>
