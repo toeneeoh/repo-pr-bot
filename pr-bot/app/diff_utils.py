@@ -10,6 +10,55 @@ import re
 from pathlib import Path
 
 
+def _diff_touched_files(diff: str) -> set[str]:
+    files: set[str] = set()
+    for line in diff.splitlines():
+        if line.startswith("diff --git "):
+            m = re.match(r"diff --git a/(.+?) b/(.+)$", line)
+            if m:
+                # prefer the b/ path (new path)
+                files.add(m.group(2))
+    return files
+
+
+def diff_files_exist(repo_root: Path, diff: str) -> tuple[bool, str]:
+    """
+    reject diffs that reference files outside the repo or
+    claim to modify missing files (unless it's clearly a new file).
+
+    returns (ok, msg)
+    """
+    touched = _diff_touched_files(diff)
+
+    for rel in touched:
+        p = Path(rel)
+        if p.is_absolute() or ".." in p.parts:
+            return False, f"diff contains unsafe path: {rel}"
+
+        abs_path = (repo_root / rel).resolve()
+
+        # ensure still under repo_root
+        try:
+            abs_path.relative_to(repo_root.resolve())
+        except Exception:
+            return False, f"diff path escapes repo root: {rel}"
+
+        if abs_path.exists():
+            continue
+
+        # allow "new file" diffs
+        new_file_ok = (
+            f"+++ b/{rel}" in diff
+            and ("--- /dev/null" in diff or "new file mode" in diff)
+        )
+        if new_file_ok:
+            continue
+
+        return False, f"diff touches missing file: {rel}"
+
+    return True, ""
+
+
 def strip_to_unified_diff(text: str) -> str:
     m = re.search(r"```diff\s*(.*?)\s*```", text, flags=re.DOTALL | re.IGNORECASE)
     if m:
