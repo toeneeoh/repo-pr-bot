@@ -104,7 +104,7 @@ def tests_run(req: TestRunRequest) -> TestRunResponse:
 def repos_scan(name: str) -> RepoScanResponse:
     info = _registry().get(name)
     scan = _svc().scan(info)
-    return RepoScanResponse(**scan.model_dump())
+    return RepoScanResponse(**scan.to_primitive())
 
 
 @router.post("/repos/{name}/autopr", response_model=AutoPRResponse)
