@@ -35,7 +35,7 @@ services:
       - OLLAMA_MODEL=qwen2.5-coder:7b
     volumes:
       - ./pr-bot:/app
-      - /Users/tony/repos:/repos
+      - ./repos:/repos
       - prbot_work:/work
       - ./config:/config
     restart: unless-stopped
